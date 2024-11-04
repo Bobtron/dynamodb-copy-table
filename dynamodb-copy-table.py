@@ -2,7 +2,9 @@ import sys
 import os
 import json
 import copy
+import time
 import boto3
+from botocore.exceptions import ClientError
 
 
 # JSON 'template' of attributes to be used in createTable call from describeTable response
@@ -74,7 +76,6 @@ attr_to_keep = {
 
 def remove_unused_attr(attr_template, source_data):
     """Removes attributes found in source_data that do not exist in the template"""
-
     if isinstance(attr_template, dict):
         assert isinstance(source_data, dict)
         curr_keys = list(source_data.keys())
@@ -89,7 +90,85 @@ def remove_unused_attr(attr_template, source_data):
             remove_unused_attr(attr_template[0], item)
     elif isinstance(attr_template, str):
         assert isinstance(source_data, (str, bool, int))
-        # TODO: check if the values are valid
+        # TODO: check if the values in source_data are valid
+
+def create_dst_table(dynamodb_client, src_table_name, dst_table_name):
+    """Creates the destination table if applicable"""
+    response = None
+    try:
+        response = dynamodb_client.describe_table(
+            TableName=src_table_name
+        )
+    except ClientError as err:
+        if err.response['Error']['Code'] == 'ResourceNotFoundException':
+            print(f'Source table named {src_table_name} not found')
+        else:
+            print(f'Unknown exception {err} encountered')
+        raise err
+
+    try:
+        dst_response = dynamodb_client.describe_table(
+            TableName=dst_table_name
+        )
+        dst_table_status = dst_response['Table']['TableStatus']
+        assert dst_table_status == 'ACTIVE', \
+            f'Destination table exists but TableStatus={dst_table_status} is not ACTIVE'
+        print(f'Destination table named {dst_table_name} already exists, skipping creation')
+        return
+    except ClientError as err:
+        if err.response['Error']['Code'] == 'ResourceNotFoundException':
+            print(f'Destination table named {dst_table_name} not found, creating...')
+        else:
+            print(f'Unknown exception {err} encountered')
+            raise err
+
+    src_table = response['Table']
+    dst_table = copy.deepcopy(src_table)
+
+    assert src_table['TableStatus'] == 'ACTIVE', \
+        f'Source table TableStatus={src_table["TableStatus"]} is not ACTIVE'
+
+    print(json.dumps(src_table, indent=2, default=str))
+
+    # Create the new destination table with same attributes from old table except the table name
+    remove_unused_attr(attr_to_keep, dst_table)
+
+    # Other attributes to be added to dst_table that are different from DescribeTable response
+    if 'BillingModeSummary' in src_table.keys():
+        dst_table['BillingMode'] = src_table['BillingModeSummary']['BillingMode']
+    else:
+        if 'OnDemandThroughput' in dst_table.keys():
+            dst_table['BillingMode'] = 'PAY_PER_REQUEST'
+        else:
+            # Defaults to PROVISIONED if no BillingMode in source table and
+            # no OnDemandThroughput specified
+            dst_table['BillingMode'] = 'PROVISIONED'
+    if 'TableClassSummary' in src_table.keys():
+        dst_table['TableClass'] = src_table['TableClassSummary']['TableClass']
+    else: # Defaults to STANDARD
+        dst_table['TableClass'] = 'STANDARD'
+    dst_table['TableName'] = dst_table_name
+
+    print(json.dumps(dst_table, indent=2, default=str))
+
+    dynamodb_client.create_table(**dst_table)
+    time.sleep(5)
+    while True:
+        try:
+            dst_response = dynamodb_client.describe_table(
+                TableName=dst_table_name
+            )
+            dst_table_status = dst_response['Table']['TableStatus']
+            assert dst_table_status in {'ACTIVE', 'CREATING'}, \
+                f'Destination table TableStatus={dst_table_status} is invalid'
+            if dst_table_status == 'ACTIVE':
+                print(f'Destination table {dst_table_name} created')
+                break
+            print(f'Destination table {dst_table_name} creating...')
+            time.sleep(3)
+        except ClientError as err:
+            print(f'Unknown exception {err} encountered')
+            raise err
 
 
 def main():
@@ -97,33 +176,22 @@ def main():
 
     src_table_name = sys.argv[1]
     dst_table_name = sys.argv[2]
-    region = os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
-    profile_name = os.getenv('PROFILE_NAME', None)
+    REGION = os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
+    PROFILE_NAME = os.getenv('PROFILE_NAME', None)
+    DISABLE_CREATION = 'DISABLE_CREATION' in os.environ
+    DISABLE_DATACOPY = 'DISABLE_DATACOPY' in os.environ
 
-    print(f'Using region: {region}')
-    print(f'Using profile name: {profile_name}')
+    print(f'Using region: {REGION}')
+    print(f'Using profile name: {PROFILE_NAME}')
 
-    boto_session = boto3.Session(profile_name=profile_name)
-    dynamodb_client = boto_session.client('dynamodb', region_name=region)
+    boto_session = boto3.Session(profile_name=PROFILE_NAME)
+    dynamodb_client = boto_session.client('dynamodb', region_name=REGION)
 
-    response = dynamodb_client.describe_table(
-        TableName=src_table_name
-    )
+    if not DISABLE_CREATION:
+        create_dst_table(dynamodb_client, src_table_name, dst_table_name)
 
-    source_table = response['Table']
-    dest_table = copy.deepcopy(source_table)
-
-    print(json.dumps(source_table, indent=2, default=str))
-
-    remove_unused_attr(attr_to_keep, dest_table)
-
-    if 'BillingModeSummary' in source_table.keys():
-        dest_table['BillingMode'] = source_table['BillingModeSummary']['BillingMode']
-    if 'TableClassSummary' in source_table.keys():
-        dest_table['TableClass'] = source_table['TableClassSummary']['TableClass']
-    dest_table['TableName'] = dst_table_name
-
-    print(json.dumps(dest_table, indent=2, default=str))
+    if not DISABLE_DATACOPY:
+        pass
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
