@@ -90,7 +90,8 @@ def remove_unused_attr(attr_template, source_data):
             remove_unused_attr(attr_template[0], item)
     elif isinstance(attr_template, str):
         assert isinstance(source_data, (str, bool, int))
-        # TODO: check if the values in source_data are valid
+        # TODO: check if the values in source_data are valid according to
+        # the values accepted by boto3 API
 
 def create_dst_table(dynamodb_client, src_table_name, dst_table_name):
     """Creates the destination table if applicable"""
@@ -128,7 +129,7 @@ def create_dst_table(dynamodb_client, src_table_name, dst_table_name):
     assert src_table['TableStatus'] == 'ACTIVE', \
         f'Source table TableStatus={src_table["TableStatus"]} is not ACTIVE'
 
-    print(json.dumps(src_table, indent=2, default=str))
+    # print(json.dumps(src_table, indent=2, default=str))
 
     # Create the new destination table with same attributes from old table except the table name
     remove_unused_attr(attr_to_keep, dst_table)
@@ -149,7 +150,7 @@ def create_dst_table(dynamodb_client, src_table_name, dst_table_name):
         dst_table['TableClass'] = 'STANDARD'
     dst_table['TableName'] = dst_table_name
 
-    print(json.dumps(dst_table, indent=2, default=str))
+    # print(json.dumps(dst_table, indent=2, default=str))
 
     dynamodb_client.create_table(**dst_table)
     time.sleep(5)
@@ -170,6 +171,29 @@ def create_dst_table(dynamodb_client, src_table_name, dst_table_name):
             print(f'Unknown exception {err} encountered')
             raise err
 
+def copy_from_src_to_dst(dynamodb_client, src_table_name, dst_table_name):
+    src_scan_response = dynamodb_client.scan(
+        TableName=src_table_name,
+        Limit=2,
+        Select='ALL_ATTRIBUTES'
+    )
+
+    while True:
+        items = src_scan_response['Items']
+        print(json.dumps(items, indent=2, default=str))
+        if 'LastEvaluatedKey' not in src_scan_response.keys():
+            print('We are done')
+            break
+        exclusive_start_key = src_scan_response['LastEvaluatedKey']
+
+        src_scan_response = dynamodb_client.scan(
+            TableName=src_table_name,
+            Limit=2,
+            Select='ALL_ATTRIBUTES',
+            ExclusiveStartKey=exclusive_start_key
+        )
+
+    # print(json.dumps(src_scan_response, indent=2, default=str))
 
 def main():
     """Entrypoint"""
@@ -191,7 +215,7 @@ def main():
         create_dst_table(dynamodb_client, src_table_name, dst_table_name)
 
     if not DISABLE_DATACOPY:
-        pass
+        copy_from_src_to_dst(dynamodb_client, src_table_name, dst_table_name)
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
