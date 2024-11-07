@@ -172,28 +172,34 @@ def create_dst_table(dynamodb_client, src_table_name, dst_table_name):
             raise err
 
 def copy_from_src_to_dst(dynamodb_client, src_table_name, dst_table_name):
+    print(f'Initial scan for items in {src_table_name} table')
     src_scan_response = dynamodb_client.scan(
         TableName=src_table_name,
-        Limit=2,
         Select='ALL_ATTRIBUTES'
     )
 
-    while True:
+    while 'Items' in src_scan_response.keys():
         items = src_scan_response['Items']
-        print(json.dumps(items, indent=2, default=str))
+
+        print(f'Put items from scan into {dst_table_name} table')
+        for item in items:
+            dynamodb_client.put_item(
+                TableName=dst_table_name,
+                Item=item
+            )
+
         if 'LastEvaluatedKey' not in src_scan_response.keys():
-            print('We are done')
+            print(f'Copying from {src_table_name} table to {dst_table_name} table completed')
             break
         exclusive_start_key = src_scan_response['LastEvaluatedKey']
 
+        print(f'Scan for items in {src_table_name} table with exclusive start key {exclusive_start_key}')
+
         src_scan_response = dynamodb_client.scan(
             TableName=src_table_name,
-            Limit=2,
             Select='ALL_ATTRIBUTES',
             ExclusiveStartKey=exclusive_start_key
         )
-
-    # print(json.dumps(src_scan_response, indent=2, default=str))
 
 def main():
     """Entrypoint"""
