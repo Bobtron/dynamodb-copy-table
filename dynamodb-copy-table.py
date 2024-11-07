@@ -172,21 +172,32 @@ def create_dst_table(dynamodb_client, src_table_name, dst_table_name):
             raise err
 
 def copy_from_src_to_dst(dynamodb_client, src_table_name, dst_table_name):
+    """Copies the items from src table to dst table"""
+    # TODO: Error handling, especially ProvisionedThroughputExceededException
+
     print(f'Initial scan for items in {src_table_name} table')
-    src_scan_response = dynamodb_client.scan(
-        TableName=src_table_name,
-        Select='ALL_ATTRIBUTES'
-    )
+    try:
+        src_scan_response = dynamodb_client.scan(
+            TableName=src_table_name,
+            Select='ALL_ATTRIBUTES'
+        )
+    except ClientError as err:
+        print(f'Unknown exception {err} encountered')
+        raise err
 
     while 'Items' in src_scan_response.keys():
         items = src_scan_response['Items']
 
         print(f'Put items from scan into {dst_table_name} table')
         for item in items:
-            dynamodb_client.put_item(
-                TableName=dst_table_name,
-                Item=item
-            )
+            try: 
+                dynamodb_client.put_item(
+                    TableName=dst_table_name,
+                    Item=item
+                )
+            except ClientError as err:
+                print(f'Unknown exception {err} encountered')
+                raise err
 
         if 'LastEvaluatedKey' not in src_scan_response.keys():
             print(f'Copying from {src_table_name} table to {dst_table_name} table completed')
@@ -195,11 +206,15 @@ def copy_from_src_to_dst(dynamodb_client, src_table_name, dst_table_name):
 
         print(f'Scan for items in {src_table_name} table with exclusive start key {exclusive_start_key}')
 
-        src_scan_response = dynamodb_client.scan(
-            TableName=src_table_name,
-            Select='ALL_ATTRIBUTES',
-            ExclusiveStartKey=exclusive_start_key
-        )
+        try:
+            src_scan_response = dynamodb_client.scan(
+                TableName=src_table_name,
+                Select='ALL_ATTRIBUTES',
+                ExclusiveStartKey=exclusive_start_key
+            )
+        except ClientError as err:
+            print(f'Unknown exception {err} encountered')
+            raise err
 
 def main():
     """Entrypoint"""
