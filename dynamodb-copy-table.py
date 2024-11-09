@@ -219,18 +219,43 @@ def copy_from_src_to_dst(dynamodb_client, src_table_name, dst_table_name):
 def main():
     """Entrypoint"""
 
+    def getenv(var_name, default=None):
+        """Look for an environment variable in a case-insensitive way"""
+        for key, value in os.environ.items():
+            if key.lower() == var_name.lower():
+                return value
+        return default
+
+    def env_exists(var_name):
+        """Return if environmental variable exists"""
+        for key in os.environ.keys():
+            if key.lower() == var_name.lower():
+                return True
+        return False
+
     src_table_name = sys.argv[1]
     dst_table_name = sys.argv[2]
-    REGION = os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
-    PROFILE_NAME = os.getenv('PROFILE_NAME', None)
-    DISABLE_CREATION = 'DISABLE_CREATION' in os.environ
-    DISABLE_DATACOPY = 'DISABLE_DATACOPY' in os.environ
+    REGION = getenv('AWS_DEFAULT_REGION', 'us-west-2')
+    PROFILE_NAME = getenv('PROFILE_NAME', None)
+    AWS_ACCESS_KEY = getenv('AWS_ACCESS_KEY_ID', None)
+    AWS_SECRET_ACCESS_KEY = getenv('AWS_SECRET_ACCESS_KEY', None)
+    DISABLE_CREATION = env_exists('DISABLE_CREATION')
+    DISABLE_DATACOPY = env_exists('DISABLE_DATACOPY')
+
+    boto3_session = None
 
     print(f'Using region: {REGION}')
-    print(f'Using profile name: {PROFILE_NAME}')
+    if PROFILE_NAME is not None:
+        print(f'Using profile name: {PROFILE_NAME}')
+        boto3_session = boto3.Session(profile_name=PROFILE_NAME)
+    elif AWS_ACCESS_KEY is not None and AWS_SECRET_ACCESS_KEY is not None:
+        print('Using AWS_ACCESS_KEY and AWS_SECRET_ACCESS_KEY')
+        boto3_session = boto3.Session(aws_access_key_id=AWS_ACCESS_KEY, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+    else:
+        print(f'Using default credentials')
+        boto3_session = boto3.Session()
 
-    boto_session = boto3.Session(profile_name=PROFILE_NAME)
-    dynamodb_client = boto_session.client('dynamodb', region_name=REGION)
+    dynamodb_client = boto3_session.client('dynamodb', region_name=REGION)
 
     if not DISABLE_CREATION:
         create_dst_table(dynamodb_client, src_table_name, dst_table_name)
