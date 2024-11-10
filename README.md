@@ -29,7 +29,7 @@ Variable | Purpose
 `AWS_DEFAULT_REGION` | Select the region (the default region is `us-west-2`)
 `DISABLE_CREATION` | Disables creation of a new table (Useful if the table already exists)
 `DISABLE_DATACOPY` | Disables copying of data from source table to destination table
-`PROFILE_NAME` | Name of AWS profile to be used for credentials (will use default profile if AWS key not specified)
+`PROFILE_NAME` | Name of AWS profile to be used for credentials (will use default profile if this and AWS key are not specified)
 `AWS_ACCESS_KEY_ID` | AWS credentials to be used if profile is not specified
 `AWS_SECRET_ACCESS_KEY` | AWS credentials to be used if profile is not specified
 
